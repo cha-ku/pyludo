@@ -21,17 +21,18 @@ from .state import GameState, PlayerState
 
 
 def movable_tokens(state: GameState, die: int) -> list[int]:
-    if state.phase == Phase.GAME_OVER:
+    if state.phase == Phase.GAME_OVER or not 1 <= die <= 6:
         return []
-    current_player_state: PlayerState = state.players[state.current_seat]
-    valid_moves = []
-    for idx, token in enumerate(current_player_state.tokens):
-        if progress_of(token) is None:  # BASE
+    player = state.players[state.current_seat]
+    movable = []
+    for idx, token in enumerate(player.tokens):
+        progress = progress_of(token)
+        if progress is None:  # BASE
             if die == 6:
-                valid_moves.append(idx)
-        elif progress_of(token) + die <= FINISHED_PROGRESS:
-            valid_moves.append(idx)
-    return valid_moves
+                movable.append(idx)
+        elif progress + die <= FINISHED_PROGRESS:
+            movable.append(idx)
+    return movable
 
 
 def _next_seat(state: GameState) -> int:
@@ -44,9 +45,8 @@ def apply_roll(state: GameState, die: int) -> GameState:
     if state.phase != Phase.AWAITING_ROLL:
         raise NotAwaitingRollError()
     if not 1 <= die <= 6:
-        raise DieOutOfRangeError(f"die must be between 1 and 6, got {die}.")
-    valid_tokens = movable_tokens(state, die)
-    if not valid_tokens:
+        raise DieOutOfRangeError(f"die must be between 1 and 6, got {die}")
+    if not movable_tokens(state, die):
         return replace(
             state, current_seat=_next_seat(state), phase=Phase.AWAITING_ROLL, pending_die=None
         )
@@ -63,15 +63,11 @@ def apply_move(state: GameState, token: int) -> GameState:
     if state.phase != Phase.AWAITING_MOVE:
         raise NotAwaitingMoveError("cannot apply move when not awaiting move")
     if not 0 <= token < TOKENS_PER_PLAYER:
-        raise InvalidTokenIndexError(
-            f"token index should be between 0 and {TOKENS_PER_PLAYER},\
-                got {token}"
-        )
+        raise InvalidTokenIndexError()
     die = state.pending_die
     if die is None or not 1 <= die <= 6:
         raise DieOutOfRangeError(f"die must be between 1 and 6, got {die}")
-    valid_tokens = movable_tokens(state, die)
-    if token not in valid_tokens:
+    if token not in movable_tokens(state, die):
         raise IllegalMoveError()
 
     player = state.players[state.current_seat]
@@ -82,7 +78,7 @@ def apply_move(state: GameState, token: int) -> GameState:
     else:
         new_token_pos = position_from_progress(old_token_pos + die)
 
-    current_finished = new_token_pos.kind == PosKind.FINISHED
+    token_finished = new_token_pos.kind == PosKind.FINISHED
     new_tokens = player.tokens[:token] + (new_token_pos,) + player.tokens[token + 1 :]
 
     mover = replace(player, tokens=new_tokens)
@@ -117,6 +113,6 @@ def apply_move(state: GameState, token: int) -> GameState:
 
     state = replace(state, players=tuple(players), phase=Phase.AWAITING_ROLL, pending_die=None)
 
-    if captured or die == 6 or current_finished:
+    if captured or die == 6 or token_finished:
         return state
     return replace(state, current_seat=_next_seat(state))
