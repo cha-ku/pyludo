@@ -1,0 +1,34 @@
+# Bytecode compiled by the interpreter
+__pycache__/
+*.py[cod]
+
+# Virtualenv (uv recreates it from uv.lock with `uv sync`)
+.venv/
+
+# Build output (`uv build`)
+build/
+dist/
+*.egg-info/
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local config and secrets (M7 reads settings from env vars; keep real values out of git)
+.env
+.env.*
+
+# Editors
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Note: uv.lock and .python-version are deliberately NOT ignored; commit them so
+# every machine and the Docker image get the same interpreter and dependencies.
+
+# Personal design notes (not versioned)
+PRIMER.md
