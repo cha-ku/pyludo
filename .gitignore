@@ -26,9 +26,3 @@ htmlcov/
 *~
 .idea/
 .vscode/
-
-# Note: uv.lock and .python-version are deliberately NOT ignored; commit them so
-# every machine and the Docker image get the same interpreter and dependencies.
-
-# Personal design notes (not versioned)
-PRIMER.md
