@@ -1,7 +1,7 @@
 from typing import NamedTuple
 
 from .engine.models import Colour, PosKind, TokenPosition
-from .engine.path import absolute_of
+from .engine.path import HOME_COLUMN_LENGTH, RING_SIZE, TOKENS_PER_PLAYER, absolute_of
 
 
 class Cell(NamedTuple):
@@ -26,7 +26,7 @@ _BASE_SLOTS = {
 
 
 def rotate_clockwise(cell: Cell) -> Cell:
-    return Cell(cell.col, 14 - cell.row)
+    return Cell(cell.col, (GRID_SIZE - 1) - cell.row)
 
 
 def _generate_track() -> tuple[Cell, ...]:
@@ -55,14 +55,14 @@ TRACK = _generate_track()
 
 
 def track_cell(absolute: int) -> Cell:
-    if not 0 <= absolute <= 51:
-        raise ValueError(f"value should be in range 0 to 51, got {absolute}")
+    if not 0 <= absolute < RING_SIZE:
+        raise ValueError(f"value should be between 0 and {RING_SIZE - 1}, got {absolute}")
     return TRACK[absolute]
 
 
 def base_cell(colour: Colour, index: int) -> Cell:
-    if not 0 <= index <= 3:
-        raise ValueError(f"index expected to be between 0 and 3, got {index}")
+    if not 0 <= index < TOKENS_PER_PLAYER:
+        raise ValueError(f"value should be between 0 and {TOKENS_PER_PLAYER - 1}, got {index}")
     return _BASE_SLOTS[colour][index]
 
 
@@ -78,8 +78,8 @@ _HOME_COLUMNS = _generate_home_column()
 
 
 def home_column_cell(colour: Colour, index: int) -> Cell:
-    if not 0 <= index <= 4:
-        raise ValueError(f"index expected to be between 0 and 4, got {index}")
+    if not 0 <= index < HOME_COLUMN_LENGTH:
+        raise ValueError(f"value should be between 0 and {HOME_COLUMN_LENGTH - 1}, got {index}")
     return _HOME_COLUMNS[colour][index]
 
 
