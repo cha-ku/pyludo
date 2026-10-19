@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main>
+  <h1>pyludo</h1>
+
+  {# One user unit = one board square: the viewBox makes the grid 15x15 whatever the pixel size.
+     SVG x is the column and y is the row. Elements paint in document order, so later ones cover
+     earlier ones: yards first, then the squares on top of them. #}
+  <svg class="board" viewBox="0 0 15 15" role="img" aria-label="Ludo board">
+
+    {% for colour, origin in yards.items() %}
+    <rect class="yard" data-colour="{{ colour }}"
+          x="{{ origin.col }}" y="{{ origin.row }}" width="6" height="6"/>
+    {% endfor %}
+
+    {# The 3x3 middle of the board, purely decorative. The finish square sits on top of it. #}
+    <rect class="centre-area" x="6" y="6" width="3" height="3"/>
+
+    {% for cell in track %}
+    <rect class="track{% if loop.index0 in safe_squares %} safe{% endif %}" data-index="{{ loop.index0 }}"
+          x="{{ cell.col }}" y="{{ cell.row }}" width="1" height="1"/>
+    {% endfor %}
+
+    {% for colour, cells in home_columns.items() %}
+    {% for cell in cells %}
+    <rect class="home" data-colour="{{ colour }}" data-index="{{ loop.index0 }}"
+          x="{{ cell.col }}" y="{{ cell.row }}" width="1" height="1"/>
+    {% endfor %}
+    {% endfor %}
+
+    {% for colour, cells in base_slots.items() %}
+    {% for cell in cells %}
+    <rect class="base" data-colour="{{ colour }}" data-index="{{ loop.index0 }}"
+          x="{{ cell.col }}" y="{{ cell.row }}" width="1" height="1"/>
+    {% endfor %}
+    {% endfor %}
+
+    <rect class="centre" x="{{ centre.col }}" y="{{ centre.row }}" width="1" height="1"/>
+  </svg>
+</main>
+{% endblock %}
