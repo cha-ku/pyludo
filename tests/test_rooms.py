@@ -267,10 +267,12 @@ def test_play_again_includes_people_who_joined_between_games():
 # --- Rolling and moving ----------------------------------------------------
 
 
-def test_rolling_before_a_game_is_an_error():
+def test_rolling_or_moving_before_a_game_is_an_error():
     room, (ann, _) = _room_with(2)
     with pytest.raises(GameNotStartedError):
         room.roll(ann.session, 6)
+    with pytest.raises(GameNotStartedError):
+        room.move(ann.session, 0)
 
 
 def test_the_current_player_rolls_and_moves():
@@ -393,3 +395,13 @@ def test_remove_empty_rooms_removes_only_rooms_with_nobody_connected():
     assert busy.code in registry
     assert idle.code not in registry
     assert len(registry) == 1
+
+
+# --- sessions now come from the network --------------------------------
+
+
+def test_a_session_from_the_network_can_be_any_text():
+    room, _ = _room_with(1)
+    with pytest.raises(UnknownSessionError):  # not a TypeError or a crash
+        room.disconnect("ünïcödé")
+    assert room.join("Bob", session="ünïcödé").seat == 1  # unknown, so a fresh join

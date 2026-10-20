@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from .engine.errors import LudoError
 from .engine.models import Colour, Phase
-from .engine.rules import apply_move, apply_roll
+from .engine.rules import apply_move, apply_roll, movable_tokens
 from .engine.state import GameState, new_game
 
 MIN_NICKNAME_LEN = 1
@@ -69,6 +69,7 @@ class Room:
     host: Member | None = None
     game: GameState | None = None
     members: list[Member] = field(default_factory=list)
+    _single_movable_token: list[int] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
@@ -97,7 +98,12 @@ class Room:
 
     def _member_with_session(self, session: str) -> Member:
         member = next(
-            iter(m for m in self.members if secrets.compare_digest(m.session, session)), None
+            iter(
+                m
+                for m in self.members
+                if secrets.compare_digest(m.session.encode(), session.encode())
+            ),
+            None,
         )
         if member is None:
             raise UnknownSessionError()
@@ -117,8 +123,13 @@ class Room:
         if member.seat != self.game.current_seat:
             raise NotYourTurnError()
         self.game = apply_roll(self.game, die)
+        tokens = movable_tokens(self.game, die)
+        if len(tokens) == 1:
+            self.move(session, tokens[0])
 
     def move(self, session: str, token_index: int) -> None:
+        if self.game is None:
+            raise GameNotStartedError()
         member = self._member_with_session(session)
         if member.seat != self.game.current_seat:
             raise NotYourTurnError()
