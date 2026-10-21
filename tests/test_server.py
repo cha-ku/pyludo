@@ -6,7 +6,8 @@ from fastapi.testclient import TestClient
 from pyludo.board_layout import CENTRE, YARD_ORIGIN, base_cell, home_column_cell, track_cell
 from pyludo.engine.models import Colour
 from pyludo.engine.path import SAFE_SQUARES
-from pyludo.server import app
+from pyludo.rooms import RoomRegistry
+from pyludo.server import create_app
 
 
 class _Elements(HTMLParser):
@@ -39,13 +40,29 @@ def _cell_of(attrs: dict[str, str]) -> tuple[int, int]:
 
 
 @pytest.fixture(scope="module")
-def client():
-    return TestClient(app)
+def registry():
+    return RoomRegistry()
 
 
 @pytest.fixture(scope="module")
-def page(client):
+def client(registry):
+    return TestClient(create_app(registry=registry))
+
+
+@pytest.fixture(scope="module")
+def room(registry):
+    return registry.create()
+
+
+@pytest.fixture(scope="module")
+def landing(client):
     return client.get("/")
+
+
+@pytest.fixture(scope="module")
+def page(client, room):
+    """The room page, which is where the board lives from M5 on."""
+    return client.get(f"/r/{room.code}")
 
 
 @pytest.fixture(scope="module")
@@ -71,18 +88,88 @@ def test_unknown_paths_are_404(client):
     assert client.get("/no-such-page").status_code == 404
 
 
-def test_index_is_an_html_page(page):
-    assert page.status_code == 200
-    assert page.headers["content-type"].startswith("text/html")
-    assert page.text.lstrip().lower().startswith("<!doctype html>")
+def _assert_html_page(response) -> None:
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.text.lstrip().lower().startswith("<!doctype html>")
 
 
-def test_the_page_links_a_stylesheet_that_is_served(client, page):
-    links = [a for tag, a in _elements(page.text) if tag == "link" and a.get("rel") == "stylesheet"]
+def test_the_landing_page_and_the_room_page_are_html(landing, page):
+    _assert_html_page(landing)
+    _assert_html_page(page)
+
+
+@pytest.mark.parametrize("which", ["landing", "page"])
+def test_both_pages_link_a_stylesheet_that_is_served(client, request, which):
+    html = request.getfixturevalue(which).text
+    links = [a for tag, a in _elements(html) if tag == "link" and a.get("rel") == "stylesheet"]
     assert links, "no <link rel='stylesheet'> in the page"
     css = client.get(links[0]["href"])
     assert css.status_code == 200
     assert css.headers["content-type"].startswith("text/css")
+
+
+# --- Creating a room -------------------------------------------------------
+
+
+def test_the_landing_page_has_a_form_that_posts_to_rooms(landing):
+    elements = _elements(landing.text)
+    forms = [a for tag, a in elements if tag == "form"]
+    assert len(forms) == 1
+    assert forms[0].get("method", "").lower() == "post"
+    assert forms[0].get("action") == "/rooms"
+    assert any(tag == "button" for tag, _ in elements), "no button to submit the form"
+
+
+def test_the_landing_page_has_no_board(landing):
+    assert not any(tag == "svg" for tag, _ in _elements(landing.text))
+
+
+def test_creating_a_room_redirects_to_its_page():
+    registry = RoomRegistry()
+    client = TestClient(create_app(registry=registry))
+    r = client.post("/rooms", follow_redirects=False)
+    assert r.status_code == 303  # See Other: "now GET this other page"
+    location = r.headers["location"]
+    assert location.startswith("/r/")
+    code = location.removeprefix("/r/")
+    assert code in registry
+    assert len(registry) == 1
+    _assert_html_page(client.get(location))
+
+
+def test_every_post_creates_a_new_room():
+    registry = RoomRegistry()
+    client = TestClient(create_app(registry=registry))
+    first = client.post("/rooms", follow_redirects=False).headers["location"]
+    second = client.post("/rooms", follow_redirects=False).headers["location"]
+    assert first != second
+    assert len(registry) == 2
+
+
+def test_a_room_cannot_be_created_with_get(client, registry):
+    rooms_before = len(registry)
+    assert client.get("/rooms").status_code == 405  # Method Not Allowed: GET must not change things
+    assert len(registry) == rooms_before
+
+
+def test_a_created_room_can_be_joined_over_the_websocket():
+    client = TestClient(create_app(registry=RoomRegistry()))
+    code = client.post("/rooms", follow_redirects=False).headers["location"].removeprefix("/r/")
+    with client.websocket_connect(f"/ws/{code}") as ws:
+        ws.send_json({"type": "hello", "nickname": "Ann"})
+        assert ws.receive_json()["type"] == "welcome"
+
+
+# --- The room page ---------------------------------------------------------
+
+
+def test_the_room_page_shows_the_room_code(page, room):
+    assert room.code in page.text
+
+
+def test_an_unknown_room_is_404(client):
+    assert client.get("/r/no-such-room").status_code == 404
 
 
 # --- The SVG board ---------------------------------------------------------

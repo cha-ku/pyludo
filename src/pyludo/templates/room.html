@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+
+{% block content %}
+<main>
+  <h1>pyludo</h1>
+  <p>Room <code>{{ code }}</code>. Share this page's address to invite players.</p>
+  {% include "_board.html" %}
+</main>
+{% endblock %}

@@ -4,7 +4,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import NamedTuple
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -49,6 +50,16 @@ def create_app(
     app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=BASE_DIR / "templates")
     resources_per_room: dict[str, PerRoomResources] = {}
+    board = {
+        "track": [track_cell(i) for i in range(RING_SIZE)],
+        "safe_squares": SAFE_SQUARES,
+        "home_columns": {
+            c: [home_column_cell(c, i) for i in range(HOME_COLUMN_LENGTH)] for c in Colour
+        },
+        "base_slots": {c: [base_cell(c, i) for i in range(TOKENS_PER_PLAYER)] for c in Colour},
+        "yards": YARD_ORIGIN,
+        "centre": CENTRE,
+    }
 
     @app.get("/healthz")
     async def health_check():
@@ -56,22 +67,18 @@ def create_app(
 
     @app.get("/")
     def index(request: Request):
-        return templates.TemplateResponse(
-            request,
-            "board.html",
-            {
-                "track": [track_cell(i) for i in range(RING_SIZE)],
-                "safe_squares": SAFE_SQUARES,
-                "home_columns": {
-                    c: [home_column_cell(c, i) for i in range(HOME_COLUMN_LENGTH)] for c in Colour
-                },
-                "base_slots": {
-                    c: [base_cell(c, i) for i in range(TOKENS_PER_PLAYER)] for c in Colour
-                },
-                "yards": YARD_ORIGIN,
-                "centre": CENTRE,
-            },
-        )
+        return templates.TemplateResponse(request, "landing.html")
+
+    @app.post("/rooms")
+    def create_room():
+        room = registry.create()
+        return RedirectResponse(f"/r/{room.code}", status_code=303)
+
+    @app.get("/r/{code}")
+    def room(request: Request, code: str):
+        if code not in registry:
+            raise HTTPException(status_code=404, detail="Room not found")
+        return templates.TemplateResponse(request, "room.html", {"code": code, **board})
 
     async def _send_error(websocket: WebSocket, exception: LudoError):
         err = Error.from_exception(exception)
