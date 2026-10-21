@@ -2,8 +2,11 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
+from .board_layout import cell_for
 from .engine.errors import LudoError
-from .engine.state import GameState
+from .engine.models import Colour, Phase, PosKind, TokenPosition
+from .engine.rules import movable_tokens
+from .engine.state import PlayerState
 from .rooms import Room
 
 
@@ -80,6 +83,70 @@ class View(BaseModel):
     model_config = ConfigDict(from_attributes=True, frozen=True)
 
 
+class CellView(View):
+    row: int
+    col: int
+
+
+class TokenView(View):
+    kind: PosKind
+    index: int
+    cell: CellView
+
+    @classmethod
+    def from_token(cls, colour: Colour, token_index: int, token: TokenPosition):
+        return cls(
+            kind=token.kind,
+            index=token.index,
+            cell=CellView.model_validate(cell_for(colour, token_index, token)),
+        )
+
+
+class DieRollView(View):
+    seat: int
+    die: int
+
+
+class PlayerStateView(View):
+    colour: Colour
+    tokens: list[TokenView]
+
+    @classmethod
+    def from_player(cls, player: PlayerState):
+        return cls(
+            colour=player.colour,
+            tokens=[
+                TokenView.from_token(player.colour, token_index, token)
+                for token_index, token in enumerate(player.tokens)
+            ],
+        )
+
+
+class GameStateView(View):
+    phase: Phase
+    last_roll: DieRollView | None
+    movable_tokens: list[int]
+    players: list[PlayerStateView]
+    current_seat: int
+    pending_die: int | None
+    winner: Colour | None
+
+    @classmethod
+    def from_room(cls, room: Room):
+        game = room.game
+        return cls(
+            phase=game.phase,
+            last_roll=DieRollView.model_validate(room.last_roll) if room.last_roll else None,
+            movable_tokens=movable_tokens(game, game.pending_die)
+            if game.phase == Phase.AWAITING_MOVE
+            else [],
+            players=[PlayerStateView.from_player(player) for player in game.players],
+            current_seat=game.current_seat,
+            pending_die=game.pending_die,
+            winner=game.winner,
+        )
+
+
 class MemberView(View):
     nickname: str
     seat: int
@@ -91,7 +158,7 @@ class Snapshot(BaseMessage):
     code: str
     host_seat: int
     members: list[MemberView]
-    game: GameState | None
+    game: GameStateView | None
 
     @classmethod
     def from_room(cls, room: Room):
@@ -99,5 +166,5 @@ class Snapshot(BaseMessage):
             code=room.code,
             host_seat=room.host.seat,
             members=[MemberView.model_validate(m) for m in room.members],
-            game=room.game,
+            game=GameStateView.from_room(room) if room.game else None,
         )
