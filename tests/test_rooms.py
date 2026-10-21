@@ -291,6 +291,14 @@ def test_a_roll_with_no_move_passes_the_turn_to_the_next_seat():
     assert room.game.current_seat == 0
 
 
+def test_a_roll_never_moves_a_token_by_itself():
+    room, (ann, _) = _started(2)
+    room.game = set_token(room.game, 0, 0, track(5))
+    room.roll(ann.session, 2)  # exactly one token can move: still Ann's choice to move it
+    assert room.game.phase == Phase.AWAITING_MOVE
+    assert room.game.players[0].tokens[0] == track(5)
+
+
 def test_only_the_current_player_may_roll_or_move():
     room, (ann, bob) = _started(2)
     with pytest.raises(NotYourTurnError):

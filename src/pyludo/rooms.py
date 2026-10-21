@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from .engine.errors import LudoError
 from .engine.models import Colour, Phase
-from .engine.rules import apply_move, apply_roll, movable_tokens
+from .engine.rules import apply_move, apply_roll
 from .engine.state import GameState, new_game
 
 MIN_NICKNAME_LEN = 1
@@ -123,10 +123,6 @@ class Room:
         if member.seat != self.game.current_seat:
             raise NotYourTurnError()
         self.game = apply_roll(self.game, die)
-        # auto-move if only single movable token
-        tokens = movable_tokens(self.game, die)
-        if len(tokens) == 1:
-            self.move(session, tokens[0])
 
     def move(self, session: str, token_index: int) -> None:
         if self.game is None:
