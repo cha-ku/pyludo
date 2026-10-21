@@ -37,6 +37,7 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+unfixable = ["F401"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["pyludo", "helpers"]
