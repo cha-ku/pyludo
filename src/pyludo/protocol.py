@@ -59,7 +59,7 @@ class Error(BaseMessage):
 
     @classmethod
     def from_exception(cls, error: LudoError):
-        return cls(code=error.code, message=error.message)
+        return cls(code=error.code, message=str(error))
 
 
 class Welcome(BaseMessage):
