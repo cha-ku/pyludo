@@ -49,6 +49,7 @@ class UnknownSessionError(RoomError):
 
 class RoomFullError(RoomError):
     code = "room_full"
+    message = "Room is currently full"
 
 
 class RoomNotFoundError(RoomError):
@@ -69,7 +70,6 @@ class Room:
     host: Member | None = None
     game: GameState | None = None
     members: list[Member] = field(default_factory=list)
-    _single_movable_token: list[int] = field(default_factory=list)
 
     @property
     def is_empty(self) -> bool:
@@ -123,6 +123,7 @@ class Room:
         if member.seat != self.game.current_seat:
             raise NotYourTurnError()
         self.game = apply_roll(self.game, die)
+        # auto-move if only single movable token
         tokens = movable_tokens(self.game, die)
         if len(tokens) == 1:
             self.move(session, tokens[0])
