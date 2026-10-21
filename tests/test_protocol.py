@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from helpers import FINISHED, set_phase, set_token, track
+from helpers import FINISHED, home, set_phase, set_token, track
 from pyludo.engine.errors import LudoError
 from pyludo.engine.models import Colour, Phase
 from pyludo.protocol import (
@@ -30,6 +30,17 @@ def _room_with(*nicknames: str) -> Room:
 def _snapshot(room: Room) -> dict:
     """The snapshot exactly as a client will receive it: JSON text, parsed."""
     return json.loads(Snapshot.from_room(room).model_dump_json())
+
+
+def _started_with_two() -> Room:
+    """Ann (seat 0, Red) and Bob (seat 1, Yellow) in a new game."""
+    room = _room_with("Ann", "Bob")
+    room.start(room.members[0].session)
+    return room
+
+
+def _in_base(*cells: tuple[int, int]) -> list[dict]:
+    return [{"kind": "BASE", "index": 0, "cell": {"row": r, "col": c}} for r, c in cells]
 
 
 # --- Client -> server: parsing ---------------------------------------------
@@ -135,44 +146,64 @@ def test_a_snapshot_never_contains_a_session():
 
 
 def test_a_snapshot_of_a_new_game():
-    room = _room_with("Ann", "Bob")
-    room.start(room.members[0].session)
-    in_base = [{"kind": "BASE", "index": 0}] * 4
+    room = _started_with_two()
     assert _snapshot(room)["game"] == {
         "phase": "AWAITING_ROLL",
         "current_seat": 0,
         "pending_die": None,
         "winner": None,
+        "last_roll": None,
+        "movable_tokens": [],
         "players": [
-            {"colour": "red", "tokens": in_base},
-            {"colour": "yellow", "tokens": in_base},
+            {"colour": "red", "tokens": _in_base((1, 1), (1, 4), (4, 1), (4, 4))},
+            {"colour": "yellow", "tokens": _in_base((10, 10), (10, 13), (13, 10), (13, 13))},
         ],
     }
 
 
-def test_tokens_are_sent_as_engine_positions():
-    room = _room_with("Ann", "Bob")
-    room.start(room.members[0].session)
+def test_tokens_are_sent_as_engine_positions_with_their_board_cells():
+    room = _started_with_two()
     room.game = set_token(room.game, 0, 0, track(5))
+    room.game = set_token(room.game, 0, 1, home(2))
+    room.game = set_token(room.game, 1, 0, track(0))
     room.game = set_token(room.game, 1, 2, FINISHED)
-    players = _snapshot(room)["game"]["players"]
-    assert players[0]["tokens"][0] == {"kind": "TRACK", "index": 5}
-    assert players[1]["tokens"][2] == {"kind": "FINISHED", "index": 0}
+    red, yellow = _snapshot(room)["game"]["players"]
+    assert red["tokens"][0] == {"kind": "TRACK", "index": 5, "cell": {"row": 5, "col": 6}}
+    assert red["tokens"][1] == {"kind": "HOME_COLUMN", "index": 2, "cell": {"row": 7, "col": 3}}
+    # The same track index is a different square for each colour: Yellow starts on the far side.
+    assert yellow["tokens"][0] == {"kind": "TRACK", "index": 0, "cell": {"row": 8, "col": 13}}
+    assert yellow["tokens"][2] == {"kind": "FINISHED", "index": 0, "cell": {"row": 7, "col": 7}}
 
 
-def test_a_snapshot_after_a_roll_shows_the_pending_die():
-    room = _room_with("Ann", "Bob")
-    ann = room.members[0]
-    room.start(ann.session)
-    room.roll(ann.session, 6)
+def test_a_snapshot_after_a_roll_shows_the_die_and_the_movable_tokens():
+    room = _started_with_two()
+    room.roll(room.members[0].session, 6)
     game = _snapshot(room)["game"]
     assert game["phase"] == "AWAITING_MOVE"
     assert game["pending_die"] == 6
+    assert game["last_roll"] == {"seat": 0, "die": 6}
+    assert game["movable_tokens"] == [0, 1, 2, 3]  # a 6 lets any token out of base
+
+
+def test_only_tokens_that_can_move_are_movable():
+    room = _started_with_two()
+    room.game = set_token(room.game, 0, 2, track(5))
+    room.roll(room.members[0].session, 2)  # the others are in base and need a 6
+    assert _snapshot(room)["game"]["movable_tokens"] == [2]
+
+
+def test_a_roll_that_passes_the_turn_still_shows_the_die():
+    room = _started_with_two()
+    room.roll(room.members[0].session, 3)
+    game = _snapshot(room)["game"]
+    assert game["current_seat"] == 1
+    assert game["pending_die"] is None
+    assert game["last_roll"] == {"seat": 0, "die": 3}
+    assert game["movable_tokens"] == []
 
 
 def test_a_finished_game_shows_the_winner():
-    room = _room_with("Ann", "Bob")
-    room.start(room.members[0].session)
+    room = _started_with_two()
     room.game = replace(set_phase(room.game, Phase.GAME_OVER), winner=Colour.YELLOW)
     game = _snapshot(room)["game"]
     assert game["phase"] == "GAME_OVER"

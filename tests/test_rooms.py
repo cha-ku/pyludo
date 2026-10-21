@@ -11,6 +11,7 @@ from pyludo.engine.errors import (
 )
 from pyludo.engine.models import Colour, Phase
 from pyludo.rooms import (
+    DieRoll,
     GameInProgressError,
     GameNotStartedError,
     InvalidNicknameError,
@@ -64,7 +65,21 @@ def test_room_errors_are_ludo_errors_with_a_code(error, code):
     assert issubclass(error, RoomError)
     assert issubclass(error, LudoError)  # one `except LudoError` in M4 catches everything
     assert error.code == code
-    assert str(error())  # has a default message
+    assert error.message != LudoError.message  # a sentence a person can read, not just "error"
+
+
+def test_every_room_error_says_something_different():
+    errors = [
+        RoomNotFoundError,
+        RoomFullError,
+        UnknownSessionError,
+        InvalidNicknameError,
+        NotHostError,
+        GameInProgressError,
+        GameNotStartedError,
+        NotYourTurnError,
+    ]
+    assert len({error.message for error in errors}) == len(errors)
 
 
 # --- Joining ---------------------------------------------------------------
@@ -326,6 +341,45 @@ def test_engine_errors_pass_through_and_leave_the_game_unchanged():
     with pytest.raises(IllegalMoveError):
         room.move(ann.session, 0)  # a finished token can't move
     assert room.game is game
+
+
+# --- The last roll ---------------------------------------------------------
+
+
+def test_a_new_room_has_no_last_roll():
+    assert Room("abc").last_roll is None
+
+
+def test_a_roll_is_remembered_even_when_it_passes_the_turn():
+    room, (ann, _) = _started(2)
+    room.roll(ann.session, 3)  # nothing can move: the turn passes and the game forgets the die
+    assert room.game.pending_die is None
+    assert room.last_roll == DieRoll(seat=0, die=3)
+
+
+def test_the_last_roll_is_kept_after_the_move():
+    room, (ann, _) = _started(2)
+    room.roll(ann.session, 6)
+    room.move(ann.session, 0)
+    assert room.last_roll == DieRoll(seat=0, die=6)
+
+
+def test_a_refused_roll_is_not_remembered():
+    room, (ann, bob) = _started(2)
+    room.roll(ann.session, 6)
+    with pytest.raises(NotYourTurnError):
+        room.roll(bob.session, 4)
+    with pytest.raises(NotAwaitingRollError):
+        room.roll(ann.session, 5)  # Ann must move first
+    assert room.last_roll == DieRoll(seat=0, die=6)
+
+
+def test_starting_a_game_clears_the_last_roll():
+    room, (ann, _) = _started(2)
+    room.roll(ann.session, 3)
+    _finish_game(room)
+    room.start(ann.session)
+    assert room.last_roll is None
 
 
 # --- Colours ---------------------------------------------------------------

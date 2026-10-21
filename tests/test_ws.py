@@ -192,6 +192,19 @@ def test_the_server_rolls_the_die_and_everyone_sees_it():
             assert game["pending_die"] == 6
 
 
+def test_a_roll_that_passes_the_turn_is_shown_to_everyone():
+    client, room = _setup(dice=[3])
+    with ExitStack() as stack:
+        ann, bob = _join_two(client, room, stack)
+        _start(ann, bob)
+        ann.send_json({"type": "roll"})  # a 3 with everything in base: nothing to move
+        for ws in (ann, bob):
+            game = _snapshot(ws)["game"]
+            assert game["current_seat"] == 1
+            assert game["pending_die"] is None  # the game has moved on...
+            assert game["last_roll"] == {"seat": 0, "die": 3}  # ...but shows what Ann rolled
+
+
 def test_a_client_cannot_choose_its_own_die():
     client, room = _setup(dice=[3])
     with ExitStack() as stack:
@@ -213,7 +226,8 @@ def test_moving_a_token():
         ann.send_json({"type": "move", "token": 0})
         for ws in (ann, bob):
             snapshot = _snapshot(ws)
-            assert snapshot["game"]["players"][0]["tokens"][0] == {"kind": "TRACK", "index": 0}
+            token = snapshot["game"]["players"][0]["tokens"][0]
+            assert token == {"kind": "TRACK", "index": 0, "cell": {"row": 6, "col": 1}}
             assert snapshot["game"]["current_seat"] == 0  # rolled a 6: Ann goes again
 
 
