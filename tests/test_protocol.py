@@ -104,8 +104,8 @@ def test_an_error_message_comes_from_a_ludo_error():
 
 
 def test_an_error_message_keeps_a_custom_message():
-    error = Error.from_exception(LudoError("something specific"))
-    assert error.message == "something specific"
+    error = Error.from_exception(LudoError("token 3 is still in base"))
+    assert error.message == "token 3 is still in base"
 
 
 # --- Server -> client: snapshot --------------------------------------------
