@@ -70,9 +70,11 @@ class Welcome(BaseMessage):
 
 # -- Views to help filter fields from Models
 
+# Prevents from sending session value or other secrets to the client
+
 
 class View(BaseModel):
-    # frozen: View is immuable
+    # frozen: View is immutable
     # from_attributes: https://github.com/pydantic/pydantic/discussions/8933 -
     #                  allows partial matching of attributes
     model_config = ConfigDict(from_attributes=True, frozen=True)
