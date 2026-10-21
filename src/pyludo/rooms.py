@@ -17,34 +17,42 @@ def _default_code_generator() -> str:
 
 class RoomError(LudoError):
     code = "room_error"
+    message = "room error"
 
 
 class GameInProgressError(RoomError):
     code = "game_in_progress"
+    message = "game already in progress"
 
 
 class GameNotStartedError(RoomError):
     code = "game_not_started"
+    message = "game has not started yet"
 
 
 class InvalidMemberError(LudoError):
     code = "invalid_member"
+    message = "member is not valid"
 
 
 class InvalidNicknameError(RoomError):
     code = "invalid_nickname"
+    message = "nickname is invalid"
 
 
 class NotHostError(RoomError):
     code = "not_host"
+    message = "this action can only be done by the host"
 
 
 class NotYourTurnError(RoomError):
     code = "not_your_turn"
+    message = "it is not your turn"
 
 
 class UnknownSessionError(RoomError):
     code = "unknown_session"
+    message = "could not find a session"
 
 
 class RoomFullError(RoomError):
@@ -54,6 +62,13 @@ class RoomFullError(RoomError):
 
 class RoomNotFoundError(RoomError):
     code = "room_not_found"
+    message = "no room with that code"
+
+
+@dataclass(frozen=True)
+class DieRoll:
+    seat: int
+    die: int
 
 
 @dataclass
@@ -70,6 +85,7 @@ class Room:
     host: Member | None = None
     game: GameState | None = None
     members: list[Member] = field(default_factory=list)
+    last_roll: DieRoll | None = None
 
     @property
     def is_empty(self) -> bool:
@@ -115,6 +131,7 @@ class Room:
         if self._member_with_session(session) != self.host:
             raise NotHostError()
         self.game = new_game(len(self.members))
+        self.last_roll = None
 
     def roll(self, session: str, die: int) -> None:
         if self.game is None:
@@ -123,6 +140,7 @@ class Room:
         if member.seat != self.game.current_seat:
             raise NotYourTurnError()
         self.game = apply_roll(self.game, die)
+        self.last_roll = DieRoll(member.seat, die)
 
     def move(self, session: str, token_index: int) -> None:
         if self.game is None:
