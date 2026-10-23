@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pyludo.board_layout import CENTRE, YARD_ORIGIN, base_cell, home_column_cell, track_cell
 from pyludo.engine.models import Colour
 from pyludo.engine.path import SAFE_SQUARES
-from pyludo.rooms import RoomRegistry
+from pyludo.rooms import MAX_NICKNAME_LEN, RoomRegistry
 from pyludo.server import create_app
 
 
@@ -170,6 +170,68 @@ def test_the_room_page_shows_the_room_code(page, room):
 
 def test_an_unknown_room_is_404(client):
     assert client.get("/r/no-such-room").status_code == 404
+
+
+# --- What app.js needs from the room page ----------------------------------
+# app.js itself is checked by hand (the checklist in PRIMER.md). These tests pin down what it
+# expects to find in the page, so renaming an id in the template fails here instead of quietly
+# breaking the game in the browser.
+
+
+def _the_one_with_id(html: str, id_: str) -> tuple[str, dict[str, str]]:
+    found = [(tag, attrs) for tag, attrs in _elements(html) if attrs.get("id") == id_]
+    assert len(found) == 1, f"expected one element with id={id_!r}, found {len(found)}"
+    return found[0]
+
+
+def test_the_room_page_loads_app_js_as_a_module_that_is_served(client, page):
+    scripts = [attrs for tag, attrs in _elements(page.text) if tag == "script"]
+    assert len(scripts) == 1
+    assert scripts[0].get("type") == "module"
+    assert scripts[0].get("src", "").endswith("/app.js")
+    js = client.get(scripts[0]["src"])
+    assert js.status_code == 200
+    assert "javascript" in js.headers["content-type"]
+
+
+def test_the_landing_page_needs_no_script(landing):
+    assert not any(tag == "script" for tag, _ in _elements(landing.text))
+
+
+def test_the_room_page_tells_the_script_its_room_code(page, room):
+    holders = [attrs for _, attrs in _elements(page.text) if "data-code" in attrs]
+    assert [attrs["data-code"] for attrs in holders] == [room.code]
+
+
+def test_the_room_page_has_a_nickname_form(page):
+    assert _the_one_with_id(page.text, "join")[0] == "form"
+    elements = _elements(page.text)
+    inputs = [a for tag, a in elements if tag == "input" and a.get("name") == "nickname"]
+    assert len(inputs) == 1
+    assert "required" in inputs[0]  # the browser refuses an empty nickname before the server has to
+    assert inputs[0].get("maxlength") == str(MAX_NICKNAME_LEN)
+
+
+@pytest.mark.parametrize("id_", ["members", "status", "error"])
+def test_the_room_page_has_the_places_app_js_writes_into(page, id_):
+    _the_one_with_id(page.text, id_)
+
+
+@pytest.mark.parametrize("id_", ["start", "roll"])
+def test_the_game_buttons_are_hidden_until_app_js_shows_them(page, id_):
+    tag, attrs = _the_one_with_id(page.text, id_)
+    assert tag == "button"
+    assert "hidden" in attrs
+
+
+def test_the_board_has_an_empty_group_for_the_tokens_drawn_last(page):
+    svg = page.text[page.text.index("<svg") : page.text.index("</svg>")]
+    elements = _elements(svg)
+    ids = [attrs.get("id") for _, attrs in elements]
+    assert ids.count("tokens") == 1, "no element with id='tokens' inside the board's <svg>"
+    tokens = ids.index("tokens")
+    assert elements[tokens][0] == "g"
+    assert tokens == len(elements) - 1  # nothing after it: tokens paint on top of every square
 
 
 # --- The SVG board ---------------------------------------------------------

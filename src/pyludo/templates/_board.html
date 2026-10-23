@@ -31,4 +31,6 @@
   {% endfor %}
 
   <rect class="centre" x="{{ centre.col }}" y="{{ centre.row }}" width="1" height="1"/>
+  {# app.js draws the tokens in here. Last, so they paint on top of every square. #}
+  <g id="tokens"></g>
 </svg>

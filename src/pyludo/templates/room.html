@@ -1,9 +1,24 @@
 {% extends "base.html" %}
 
 {% block content %}
-<main>
-  <h1>pyludo</h1>
-  <p>Room <code>{{ code }}</code>. Share this page's address to invite players.</p>
+<main id="room" data-code="{{ code }}">
+  <h1>pyludo Room</h1>
+  <p>Room <code>{{ code }}</code></p>
+  <p>Share this page's address to invite players.</p>
+  <form id="join">
+    <label for="nickname">Nickname: </label>
+    <input id="nickname" name="nickname" required maxlength="20">
+    <button type="submit">Join</button>
+  </form>
+  <ul id="members"></ul>
+  {# One row of fixed height, so showing or hiding a button never moves the board. #}
+  <div class="controls">
+    <p id="status" aria-live="polite"></p>
+    <button id="start" hidden>Start game</button>
+    <button id="roll" hidden>Roll</button>
+  </div>
+  <p id="error" role="alert"></p>
   {% include "_board.html" %}
 </main>
+<script type="module" src="{{ url_for('static', path='app.js') }}"></script>
 {% endblock %}
