@@ -154,6 +154,7 @@ def test_a_snapshot_of_a_new_game():
         "winner": None,
         "last_roll": None,
         "movable_tokens": [],
+        "seconds_left": None,
         "players": [
             {"colour": "red", "tokens": _in_base((1, 1), (1, 4), (4, 1), (4, 4))},
             {"colour": "yellow", "tokens": _in_base((10, 10), (10, 13), (13, 10), (13, 13))},
@@ -208,3 +209,9 @@ def test_a_finished_game_shows_the_winner():
     game = _snapshot(room)["game"]
     assert game["phase"] == "GAME_OVER"
     assert game["winner"] == "yellow"
+
+
+def test_a_snapshot_shows_the_time_left_in_the_turn():
+    room = _started_with_two()
+    snapshot = json.loads(Snapshot.from_room(room, seconds_left=12.5).model_dump_json())
+    assert snapshot["game"]["seconds_left"] == 12.5

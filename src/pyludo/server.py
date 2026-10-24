@@ -11,7 +11,7 @@ from fastapi.templating import Jinja2Templates
 
 from .board_layout import CENTRE, YARD_ORIGIN, base_cell, home_column_cell, track_cell
 from .engine.errors import LudoError
-from .engine.models import Colour
+from .engine.models import Colour, Phase
 from .engine.path import HOME_COLUMN_LENGTH, RING_SIZE, SAFE_SQUARES, TOKENS_PER_PLAYER
 from .protocol import (
     Error,
@@ -25,6 +25,7 @@ from .protocol import (
     parse_client_message,
 )
 from .rooms import Room, RoomRegistry
+from .timers import TurnTimer
 
 
 # Lock is needed here because changes to room should be atomic.
@@ -35,6 +36,7 @@ from .rooms import Room, RoomRegistry
 class PerRoomResources(NamedTuple):
     lock: asyncio.Lock
     sockets: list[WebSocket]
+    timer: TurnTimer
 
 
 def roll_die() -> int:
@@ -42,7 +44,9 @@ def roll_die() -> int:
 
 
 def create_app(
-    registry: RoomRegistry | None = None, roll_die: Callable[[], int] = roll_die
+    registry: RoomRegistry | None = None,
+    roll_die: Callable[[], int] = roll_die,
+    turn_seconds: float = 30.0,
 ) -> FastAPI:
     registry = registry if registry is not None else RoomRegistry()
     app = FastAPI()
@@ -88,12 +92,34 @@ def create_app(
             pass
 
     async def _broadcast_snapshot(room: Room):
-        snapshot = Snapshot.from_room(room).model_dump_json()
+        timer = resources_per_room[room.code].timer
+        snapshot = Snapshot.from_room(room, timer.seconds_left).model_dump_json()
         for ws in resources_per_room[room.code].sockets:
             try:
                 await ws.send_text(snapshot)
             except Exception:
                 pass
+
+    def _resources_for(room: Room) -> PerRoomResources:
+        if room.code not in resources_per_room:
+            lock = asyncio.Lock()
+
+            async def on_expiry():
+                async with lock:
+                    room.time_out(roll_die())
+                    await _after_change(room)
+
+            timer = TurnTimer(turn_seconds, on_expiry)
+            resources_per_room[room.code] = PerRoomResources(lock, [], timer)
+        return resources_per_room[room.code]
+
+    async def _after_change(room: Room):
+        timer = resources_per_room[room.code].timer
+        if room.game is not None and room.game.phase != Phase.GAME_OVER:
+            timer.start()
+        else:
+            timer.stop()
+        await _broadcast_snapshot(room)
 
     # Normal message flow
     # client   |                | server
@@ -118,18 +144,19 @@ def create_app(
     @app.websocket("/ws/{code}")
     async def accept(websocket: WebSocket, code: str):
         await websocket.accept()
+
         try:
             room = registry.get(code)
             hello = parse_client_message(await websocket.receive_text())
             if not isinstance(hello, Hello):
                 raise InvalidMessageError("Say Hello first")
-            lock = resources_per_room.setdefault(
-                room.code, PerRoomResources(asyncio.Lock(), [])
-            ).lock
+
+            resources = _resources_for(room)
+            lock = resources.lock
             async with lock:
                 new_member = room.join(hello.nickname, hello.session if hello.session else None)
                 session = new_member.session
-                resources_per_room[room.code].sockets.append(websocket)
+                resources.sockets.append(websocket)
                 await websocket.send_text(
                     Welcome(session=session, seat=new_member.seat).model_dump_json()
                 )
@@ -148,7 +175,7 @@ def create_app(
                                     room.move(session, message.token)
                                 case Hello():
                                     raise InvalidMessageError("sent Hello again")
-                            await _broadcast_snapshot(room)
+                            await _after_change(room)
 
                     except LudoError as err:
                         await _send_error(websocket, err)
@@ -156,7 +183,7 @@ def create_app(
             except WebSocketDisconnect:
                 async with lock:
                     room.disconnect(session)
-                    resources_per_room[room.code].sockets.remove(websocket)
+                    resources.sockets.remove(websocket)
                     await _broadcast_snapshot(room)
 
         except LudoError as err:

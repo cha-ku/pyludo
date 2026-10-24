@@ -130,9 +130,10 @@ class GameStateView(View):
     current_seat: int
     pending_die: int | None
     winner: Colour | None
+    seconds_left: float | None
 
     @classmethod
-    def from_room(cls, room: Room):
+    def from_room(cls, room: Room, seconds_left: float | None = None):
         game = room.game
         return cls(
             phase=game.phase,
@@ -144,6 +145,7 @@ class GameStateView(View):
             current_seat=game.current_seat,
             pending_die=game.pending_die,
             winner=game.winner,
+            seconds_left=seconds_left,
         )
 
 
@@ -161,10 +163,10 @@ class Snapshot(BaseMessage):
     game: GameStateView | None
 
     @classmethod
-    def from_room(cls, room: Room):
+    def from_room(cls, room: Room, seconds_left: float | None = None):
         return cls(
             code=room.code,
             host_seat=room.host.seat,
             members=[MemberView.model_validate(m) for m in room.members],
-            game=GameStateView.from_room(room) if room.game else None,
+            game=GameStateView.from_room(room, seconds_left) if room.game else None,
         )

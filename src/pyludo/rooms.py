@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 
 from .engine.errors import LudoError
 from .engine.models import Colour, Phase
-from .engine.rules import apply_move, apply_roll
+from .engine.rules import apply_move, apply_roll, movable_tokens
 from .engine.state import GameState, new_game
 
 MIN_NICKNAME_LEN = 1
@@ -158,6 +158,16 @@ class Room:
         if self.game is None or self.game.player_count <= member.seat:
             return None
         return self.game.players[member.seat].colour
+
+    def time_out(self, die: int) -> None:
+        if self.game is None:
+            raise GameNotStartedError()
+        curr_member = self.members[self.game.current_seat]
+        if self.game.phase == Phase.AWAITING_ROLL:
+            self.roll(curr_member.session, die)
+        if self.game.phase == Phase.AWAITING_MOVE:
+            tokens = movable_tokens(self.game, self.game.pending_die)
+            self.move(curr_member.session, tokens[0])
 
 
 class RoomRegistry:

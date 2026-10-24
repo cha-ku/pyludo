@@ -382,6 +382,53 @@ def test_starting_a_game_clears_the_last_roll():
     assert room.last_roll is None
 
 
+# --- Running out of time ---------------------------------------------------
+# The server calls time_out when the current player's time is up. It plays the turn the way the
+# player could have: roll if they haven't yet, then move the first token that can move.
+
+
+def test_running_out_of_time_rolls_and_moves_the_first_token_that_can_move():
+    room, _ = _started(2)
+    room.time_out(6)
+    assert room.last_roll == DieRoll(seat=0, die=6)
+    assert room.game.players[0].tokens[0] == track(0)  # any token could leave base: token 0 does
+    assert room.game.current_seat == 0  # a 6: Ann rolls again
+    assert room.game.phase == Phase.AWAITING_ROLL
+
+
+def test_running_out_of_time_after_rolling_only_moves():
+    room, (ann, _) = _started(2)
+    room.roll(ann.session, 6)
+    room.time_out(4)  # the 4 isn't used: Ann had already rolled
+    assert room.last_roll == DieRoll(seat=0, die=6)
+    assert room.game.players[0].tokens[0] == track(0)
+
+
+def test_the_first_token_that_can_move_is_the_lowest_numbered():
+    room, _ = _started(2)
+    room.game = set_token(room.game, 0, 2, track(5))
+    room.game = set_token(room.game, 0, 3, track(9))
+    room.time_out(2)  # tokens 0 and 1 are in base and need a 6
+    assert room.game.players[0].tokens[2] == track(7)
+    assert room.game.players[0].tokens[3] == track(9)
+
+
+def test_a_timed_out_roll_that_passes_the_turn_moves_nothing():
+    room, _ = _started(2)
+    room.game = set_token(room.game, 1, 0, track(5))  # Bob has a token that could move a 3
+    room.time_out(3)  # nothing of Ann's can move on a 3
+    assert room.last_roll == DieRoll(seat=0, die=3)
+    assert room.game.current_seat == 1
+    assert room.game.phase == Phase.AWAITING_ROLL  # Bob's turn is his to play
+    assert room.game.players[1].tokens[0] == track(5)
+
+
+def test_running_out_of_time_needs_a_game():
+    room, _ = _room_with(2)
+    with pytest.raises(GameNotStartedError):
+        room.time_out(6)
+
+
 # --- Colours ---------------------------------------------------------------
 
 

@@ -12,6 +12,8 @@ const errorLine = document.getElementById("error");
 const startButton = document.getElementById("start");
 const rollButton = document.getElementById("roll");
 const tokensGroup = document.getElementById("tokens");
+const timerText = document.getElementById("timer");
+let turnEndsAt = null;
 
 // SVG elements must be created in the SVG namespace, or they never draw.
 const SVG = "http://www.w3.org/2000/svg";
@@ -106,6 +108,7 @@ function connect() {
     });
 
     socket.addEventListener("close", () => {
+        turnEndsAt = null;
         startButton.hidden = true;
         rollButton.hidden = true;
         tokensGroup.querySelectorAll(".movable").forEach((token) => token.classList.remove("movable"));
@@ -138,6 +141,8 @@ function render(snapshot) {
     renderRoll(snapshot.game);
     statusLine.textContent = describe(snapshot);
     drawTokens(snapshot.game);
+    const secondsLeft = snapshot.game ?. seconds_left ?? null;
+    turnEndsAt = secondsLeft === null ? null : performance.now() + secondsLeft * 1000;
 }
 
 function renderMembers(snapshot) {
@@ -276,3 +281,14 @@ if (rememberedNickname !== null) {
         connect();
     }
 }
+
+function showTimeLeft() {
+    if (turnEndsAt === null) {
+        timerText.textContent = "";
+        return;
+    }
+    // performance.now() - browser clock
+    const seconds = Math.max(0, Math.ceil((turnEndsAt - performance.now()) / 1000));
+    timerText.textContent = `${seconds} s`;
+}
+setInterval(showTimeLeft, 250);

@@ -212,7 +212,7 @@ def test_the_room_page_has_a_nickname_form(page):
     assert inputs[0].get("maxlength") == str(MAX_NICKNAME_LEN)
 
 
-@pytest.mark.parametrize("id_", ["members", "status", "error"])
+@pytest.mark.parametrize("id_", ["members", "status", "timer", "error"])
 def test_the_room_page_has_the_places_app_js_writes_into(page, id_):
     _the_one_with_id(page.text, id_)
 
