@@ -1,6 +1,7 @@
 import asyncio
 import secrets
 from collections.abc import Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import NamedTuple
 
@@ -24,7 +25,8 @@ from .protocol import (
     Welcome,
     parse_client_message,
 )
-from .rooms import Room, RoomRegistry
+from .rooms import Room, RoomRegistry, TooManyRoomsError
+from .settings import Settings
 from .timers import TurnTimer
 
 
@@ -44,12 +46,20 @@ def roll_die() -> int:
 
 
 def create_app(
+    settings: Settings | None = None,
     registry: RoomRegistry | None = None,
     roll_die: Callable[[], int] = roll_die,
-    turn_seconds: float = 30.0,
 ) -> FastAPI:
-    registry = registry if registry is not None else RoomRegistry()
-    app = FastAPI()
+    settings = settings if settings is not None else Settings()
+    registry = registry if registry is not None else RoomRegistry(max_rooms=settings.max_rooms)
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        sweeper = asyncio.create_task(sweep_forever())
+        yield
+        sweeper.cancel()
+
+    app = FastAPI(lifespan=lifespan)
     BASE_DIR = Path(__file__).parent
     app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
     templates = Jinja2Templates(directory=BASE_DIR / "templates")
@@ -74,8 +84,13 @@ def create_app(
         return templates.TemplateResponse(request, "landing.html")
 
     @app.post("/rooms")
-    def create_room():
-        room = registry.create()
+    def create_room(request: Request):
+        try:
+            room = registry.create()
+        except TooManyRoomsError as err:
+            return templates.TemplateResponse(
+                request, "landing.html", {"error": err.message}, status_code=503
+            )
         return RedirectResponse(f"/r/{room.code}", status_code=303)
 
     @app.get("/r/{code}")
@@ -109,7 +124,7 @@ def create_app(
                     room.time_out(roll_die())
                     await _after_change(room)
 
-            timer = TurnTimer(turn_seconds, on_expiry)
+            timer = TurnTimer(settings.turn_seconds, on_expiry)
             resources_per_room[room.code] = PerRoomResources(lock, [], timer)
         return resources_per_room[room.code]
 
@@ -120,6 +135,15 @@ def create_app(
         else:
             timer.stop()
         await _broadcast_snapshot(room)
+
+    async def sweep_forever():
+        loop = asyncio.get_running_loop()
+        while True:
+            await asyncio.sleep(settings.sweep_seconds)
+            for code in registry.remove_rooms_empty_for(settings.empty_room_seconds, loop.time()):
+                resources = resources_per_room.pop(code, None)
+                if resources is not None:
+                    resources.timer.stop()
 
     # Normal message flow
     # client   |                | server

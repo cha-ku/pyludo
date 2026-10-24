@@ -65,6 +65,11 @@ class RoomNotFoundError(RoomError):
     message = "no room with that code"
 
 
+class TooManyRoomsError(RoomError):
+    code = "too_many_rooms"
+    message = "server has too many rooms"
+
+
 @dataclass(frozen=True)
 class DieRoll:
     seat: int
@@ -171,9 +176,13 @@ class Room:
 
 
 class RoomRegistry:
-    def __init__(self, make_code: Callable[[], str] = _default_code_generator) -> None:
+    def __init__(
+        self, make_code: Callable[[], str] = _default_code_generator, max_rooms: int | None = None
+    ) -> None:
         self._rooms: dict[str, Room] = {}
+        self._empty_rooms: dict[str, float] = {}
         self._make_code = make_code
+        self._max_rooms = max_rooms
 
     def __contains__(self, code: str) -> bool:
         return code in self._rooms
@@ -188,18 +197,26 @@ class RoomRegistry:
             raise RoomNotFoundError() from None
 
     def create(self) -> Room:
+        if self._max_rooms is not None and self._max_rooms <= len(self._rooms):
+            raise TooManyRoomsError()
         code = self._make_code()
         while code in self._rooms:
             code = self._make_code()
         self._rooms[code] = Room(code)
         return self.get(code)
 
-    def remove_empty_rooms(self) -> list[str]:
+    def remove_rooms_empty_for(self, seconds: float, now: float) -> list[str]:
         removed_rooms = []
-        for code, room in self._rooms.items():
-            if room.is_empty:
-                removed_rooms.append(code)
-        self._rooms = {
-            code: room for code, room in self._rooms.items() if code not in removed_rooms
-        }
+        for code, room in list(self._rooms.items()):
+            if not room.is_empty:
+                self._empty_rooms.pop(code, None)
+                continue
+            if code in self._empty_rooms:
+                since = self._empty_rooms[code]
+                if now - since >= seconds:
+                    del self._rooms[code]
+                    del self._empty_rooms[code]
+                    removed_rooms.append(code)
+            else:
+                self._empty_rooms[code] = now
         return removed_rooms

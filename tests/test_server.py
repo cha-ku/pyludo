@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from pyludo.board_layout import CENTRE, YARD_ORIGIN, base_cell, home_column_cell, track_cell
 from pyludo.engine.models import Colour
 from pyludo.engine.path import SAFE_SQUARES
-from pyludo.rooms import MAX_NICKNAME_LEN, RoomRegistry
+from pyludo.rooms import MAX_NICKNAME_LEN, RoomRegistry, TooManyRoomsError
 from pyludo.server import create_app
 
 
@@ -28,6 +28,23 @@ def _elements(html: str) -> list[tuple[str, dict[str, str]]]:
     parser = _Elements()
     parser.feed(html)
     return parser.found
+
+
+class _Text(HTMLParser):
+    """Collects the text a reader sees, with entities like &#39; turned back into characters."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data):
+        self.parts.append(data)
+
+
+def _text(html: str) -> str:
+    parser = _Text()
+    parser.feed(html)
+    return " ".join(" ".join(parser.parts).split())  # one space between words, as a browser shows
 
 
 def _classes(attrs: dict[str, str]) -> set[str]:
@@ -159,6 +176,34 @@ def test_a_created_room_can_be_joined_over_the_websocket():
     with client.websocket_connect(f"/ws/{code}") as ws:
         ws.send_json({"type": "hello", "nickname": "Ann"})
         assert ws.receive_json()["type"] == "welcome"
+
+
+@pytest.fixture
+def full():
+    """A server that allows one room and already has it, answering a second Create room."""
+    registry = RoomRegistry(max_rooms=1)
+    client = TestClient(create_app(registry=registry))
+    client.post("/rooms", follow_redirects=False)
+    return registry, client.post("/rooms", follow_redirects=False)
+
+
+def test_a_full_server_refuses_another_room(full):
+    registry, r = full
+    assert r.status_code == 503  # Service Unavailable: the server is fine, just busy; try later
+    assert len(registry) == 1
+
+
+def test_a_full_server_says_why_on_a_page(full):
+    _, r = full
+    assert r.headers["content-type"].startswith("text/html")  # a person clicked a button
+    assert r.text.lstrip().lower().startswith("<!doctype html>")
+    assert " ".join(TooManyRoomsError.message.split()) in _text(r.text)
+
+
+def test_a_full_server_still_offers_to_try_again(full):
+    _, r = full
+    forms = [a for tag, a in _elements(r.text) if tag == "form"]
+    assert [f.get("action") for f in forms] == ["/rooms"]
 
 
 # --- The room page ---------------------------------------------------------

@@ -23,6 +23,7 @@ from pyludo.rooms import (
     RoomFullError,
     RoomNotFoundError,
     RoomRegistry,
+    TooManyRoomsError,
     UnknownSessionError,
 )
 
@@ -491,19 +492,98 @@ def test_a_colliding_code_is_regenerated():
     assert registry.get("AAAA") is first  # the first room was not overwritten
 
 
-def test_remove_empty_rooms_removes_only_rooms_with_nobody_connected():
+# --- Room limits and expiry (M7) -----------------------------------------
+# The sweep is told the time (`now`) instead of reading a clock, like the engine is told the die:
+# the tests choose the numbers, and nothing has to wait.
+
+EMPTY_FOR = 600.0
+
+
+def test_a_registry_can_be_capped():
+    registry = RoomRegistry(max_rooms=2)
+    registry.create()
+    registry.create()
+    with pytest.raises(TooManyRoomsError):
+        registry.create()
+    assert len(registry) == 2
+
+
+def test_too_many_rooms_is_a_room_error():
+    assert issubclass(TooManyRoomsError, RoomError)  # so it has a code and a message for the page
+
+
+def test_a_capped_registry_takes_new_rooms_again_once_one_is_removed():
+    registry = RoomRegistry(max_rooms=1)
+    registry.create()
+    registry.remove_rooms_empty_for(EMPTY_FOR, now=0.0)
+    registry.remove_rooms_empty_for(EMPTY_FOR, now=EMPTY_FOR)
+    assert len(registry) == 0
+    registry.create()  # no TooManyRoomsError
+
+
+def test_an_empty_room_is_removed_once_it_has_been_empty_long_enough():
     registry = RoomRegistry()
-    busy, idle, never_joined = registry.create(), registry.create(), registry.create()
-    busy.join("Ann")
-    gone = idle.join("Bob")
-    idle.disconnect(gone.session)
+    room = registry.create()  # nobody has joined yet: empty
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=1000.0) == []  # first seen empty now
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=1599.0) == []
+    assert room.code in registry
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=1600.0) == [room.code]
+    assert room.code not in registry
+    assert len(registry) == 0
 
-    removed = registry.remove_empty_rooms()
 
-    assert sorted(removed) == sorted([idle.code, never_joined.code])
-    assert busy.code in registry
-    assert idle.code not in registry
-    assert len(registry) == 1
+def test_a_room_with_someone_connected_is_never_removed():
+    registry = RoomRegistry()
+    room = registry.create()
+    room.join("Ann")
+    for now in [0.0, EMPTY_FOR, 10 * EMPTY_FOR]:
+        assert registry.remove_rooms_empty_for(EMPTY_FOR, now=now) == []
+    assert room.code in registry
+
+
+def test_a_room_with_only_disconnected_members_counts_as_empty():
+    registry = RoomRegistry()
+    room = registry.create()
+    ann = room.join("Ann")
+    room.disconnect(ann.session)
+    registry.remove_rooms_empty_for(EMPTY_FOR, now=0.0)
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=EMPTY_FOR) == [room.code]
+
+
+def test_coming_back_starts_the_wait_again():
+    registry = RoomRegistry()
+    room = registry.create()
+    ann = room.join("Ann")
+    room.disconnect(ann.session)
+    registry.remove_rooms_empty_for(EMPTY_FOR, now=0.0)  # seen empty
+    room.join("Ann", session=ann.session)  # back again (a refresh, say)
+    registry.remove_rooms_empty_for(EMPTY_FOR, now=300.0)  # seen busy: forget the empty time
+    room.disconnect(ann.session)
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=700.0) == []  # seen empty from 700
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=1299.0) == []  # not 600 since 0
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=1300.0) == [room.code]
+
+
+def test_each_room_waits_on_its_own():
+    registry = RoomRegistry()
+    early = registry.create()
+    late = registry.create()
+    bob = late.join("Bob")
+    registry.remove_rooms_empty_for(EMPTY_FOR, now=0.0)  # early seen empty; late is busy
+    late.disconnect(bob.session)
+    registry.remove_rooms_empty_for(EMPTY_FOR, now=100.0)  # late seen empty
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=600.0) == [early.code]
+    assert late.code in registry
+    assert registry.remove_rooms_empty_for(EMPTY_FOR, now=700.0) == [late.code]
+
+
+def test_several_rooms_can_go_in_one_sweep():
+    registry = RoomRegistry()
+    rooms = [registry.create() for _ in range(3)]
+    registry.remove_rooms_empty_for(EMPTY_FOR, now=0.0)
+    removed = registry.remove_rooms_empty_for(EMPTY_FOR, now=EMPTY_FOR)
+    assert sorted(removed) == sorted(room.code for room in rooms)
+    assert len(registry) == 0
 
 
 # --- sessions now come from the network --------------------------------

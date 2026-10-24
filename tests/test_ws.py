@@ -9,6 +9,7 @@ from helpers import FINISHED, home, set_token
 from pyludo.engine.models import Phase
 from pyludo.rooms import Room, RoomRegistry
 from pyludo.server import create_app
+from pyludo.settings import Settings
 
 # A server that forgets to send something would leave receive_json() waiting forever.
 # pytest-timeout turns that hang into a failure.
@@ -19,21 +20,21 @@ pytestmark = pytest.mark.timeout(5)
 def setup():
     """Call it to get a fresh app with its own registry, one room, and a scripted die.
 
+    Keyword arguments become the app's Settings, e.g. `setup(turn_seconds=0.3)`.
+
     The TestClient is *entered*, which runs every connection of the test on one event loop, as a
     real server does. A TestClient that isn't entered gives each connection its own loop in its own
     thread, and the turn timer started from one connection could not be stopped from another.
     """
     with ExitStack() as stack:
 
-        def make(
-            dice: list[int] | None = None, turn_seconds: float = 30.0
-        ) -> tuple[TestClient, Room]:
+        def make(dice: list[int] | None = None, **settings) -> tuple[TestClient, Room]:
             registry = RoomRegistry()
             room = registry.create()
             app = create_app(
+                settings=Settings(**settings),
                 registry=registry,
                 roll_die=iter(dice or []).__next__,
-                turn_seconds=turn_seconds,
             )
             return stack.enter_context(TestClient(app)), room
 
@@ -401,3 +402,60 @@ def test_there_is_no_countdown_once_the_game_is_over(setup):
         time.sleep(2 * TURN)
         ann.send_json({"type": "roll"})
         assert _error(ann)["code"] == "game_over"
+
+
+# --- Sweeping away empty rooms ---------------------------------------------
+
+SWEEP = 0.05  # seconds between sweeps; the real server waits a minute
+EMPTY = 0.2  # how long a room may stay empty; the real server allows ten minutes
+GONE = EMPTY + 4 * SWEEP  # long enough for any empty room to have been swept
+
+
+def _sweeping(setup, **settings):
+    return setup(empty_room_seconds=EMPTY, sweep_seconds=SWEEP, **settings)
+
+
+def test_a_room_nobody_joins_is_swept_away(setup):
+    client, room = _sweeping(setup)
+    assert client.get(f"/r/{room.code}").status_code == 200
+    time.sleep(GONE)
+    assert client.get(f"/r/{room.code}").status_code == 404
+
+
+def test_a_room_is_kept_while_someone_is_in_it(setup):
+    client, room = _sweeping(setup)
+    with client.websocket_connect(f"/ws/{room.code}") as ws:
+        _hello(ws, "Ann")
+        _snapshot(ws)
+        time.sleep(GONE)
+        assert client.get(f"/r/{room.code}").status_code == 200
+
+
+def test_a_room_everyone_has_left_is_swept_away(setup):
+    client, room = _sweeping(setup)
+    with client.websocket_connect(f"/ws/{room.code}") as ws:
+        _hello(ws, "Ann")
+        _snapshot(ws)
+    time.sleep(GONE)
+    assert client.get(f"/r/{room.code}").status_code == 404
+
+
+def test_a_swept_room_cannot_be_joined(setup):
+    client, room = _sweeping(setup)
+    time.sleep(GONE)
+    with client.websocket_connect(f"/ws/{room.code}") as ws:
+        ws.send_json({"type": "hello", "nickname": "Ann"})
+        assert _error(ws)["code"] == "room_not_found"
+        _assert_closed(ws)
+
+
+def test_a_swept_room_stops_its_turn_timer(setup):
+    turn = 2 * GONE  # the room is gone long before Ann's time would run out
+    client, room = _sweeping(setup, dice=[4], turn_seconds=turn)
+    with ExitStack() as stack:
+        ann, bob = _join_two(client, room, stack)
+        _start(ann, bob)
+    # Both have left mid-game. Without the sweep, the timer would play Ann's turn with the 4.
+    time.sleep(turn + GONE)
+    assert client.get(f"/r/{room.code}").status_code == 404
+    assert room.last_roll is None  # the timer never fired
