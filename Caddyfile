@@ -1,0 +1,3 @@
+ludo.chaku.xyz {
+    reverse_proxy pyludo:8000
+}

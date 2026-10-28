@@ -69,7 +69,8 @@ function forget(storage, key) {
 // Connecting
 // ---------------------------------------------------------------------------
 function connect() {
-    socket = new WebSocket(`ws://${location.host}/ws/${code}`);
+    const scheme = location.protocol === "https:" ? "wss" : "ws";
+    socket = new WebSocket(`${scheme}://${location.host}/ws/${code}`);
     // Per connection, not per tab: after a server restart this tab still has a seat, but the room
     // is gone, and that refusal must stop the retries.
     let welcomed = false;
