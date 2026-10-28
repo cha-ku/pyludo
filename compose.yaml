@@ -5,9 +5,10 @@ services:
     build: .
     environment:
       PYLUDO_TURN_SECONDS: "30"
+      FORWARDED_ALLOW_IPS: "*"
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:800/healthz')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
       interval: 30s
       timeout: 5s
       start_period: 5s
